@@ -12,6 +12,7 @@ from .cookie_resolver import ChromeCookieResolver
 from .models import (
     CheckCookieResult,
     CommentItem,
+    CommentPage,
     ErrorCode,
     NoteDetail,
     NoteSummary,
@@ -146,46 +147,92 @@ class XhsApi:
             raise await self._api_error_from_payload(payload, "No note detail found.")
         note_card = (items[0].get("note_card") or {})
         interact = note_card.get("interact_info") or {}
+        user = note_card.get("user") or {}
         images = note_card.get("image_list") or []
         cover_url = ""
         if images and images[0].get("url_pre"):
             cover_url = images[0]["url_pre"]
+        published_time_ms = int(note_card.get("time") or 0)
+        last_update_time_ms = int(note_card.get("last_update_time") or 0)
         return NoteDetail(
             note_id=note.note_id,
             title=note_card.get("title", ""),
-            author=(note_card.get("user") or {}).get("nickname", ""),
-            published_at=format_millis_timestamp(note_card.get("time")),
+            author=user.get("nickname", ""),
+            author_user_id=str(user.get("user_id") or ""),
+            author_xsec_token=str(user.get("xsec_token") or ""),
+            author_avatar=str(user.get("avatar") or user.get("image") or ""),
+            published_at=format_millis_timestamp(published_time_ms),
+            published_time_ms=published_time_ms,
+            last_update_at=format_millis_timestamp(last_update_time_ms),
+            last_update_time_ms=last_update_time_ms,
+            note_type=str(note_card.get("type") or ""),
             liked_count=int(interact.get("liked_count") or 0),
             collected_count=int(interact.get("collected_count") or 0),
             comment_count=int(interact.get("comment_count") or 0),
+            shared_count=int(interact.get("shared_count") or interact.get("share_count") or 0),
+            liked=bool(interact.get("liked", False)),
+            collected=bool(interact.get("collected", False)),
             content=note_card.get("desc", ""),
             cover_url=cover_url,
+            ip_location=str(note_card.get("ip_location") or ""),
+            tag_list=list(note_card.get("tag_list") or []),
+            at_user_list=list(note_card.get("at_user_list") or []),
+            image_list=list(images),
+            share_info=dict(note_card.get("share_info") or {}),
+            user=dict(user),
             url=note.url,
+            raw_note_card=dict(note_card),
         )
 
-    async def get_note_comments(self, url: str, limit: int = 10) -> list[CommentItem]:
+    async def get_note_comments(
+        self,
+        url: str,
+        limit: int = 10,
+        *,
+        cursor: str = "",
+        all_pages: bool = False,
+    ) -> CommentPage:
         note = NoteUrl.parse(url)
-        payload = await self._request_json(
-            "/api/sns/web/v2/comment/page",
-            method="GET",
-            params={
-                "note_id": note.note_id,
-                "cursor": "",
-                "top_comment_id": "",
-                "image_formats": "jpg,webp,avif",
-                "xsec_token": note.xsec_token,
-            },
-        )
-        comments = ((payload.get("data") or {}).get("comments") or [])[:limit]
-        return [
-            CommentItem(
-                user_name=((item.get("user_info") or {}).get("nickname") or ""),
-                content=item.get("content", ""),
-                created_at=format_millis_timestamp(item.get("create_time")),
-                liked_count=int(item.get("like_count") or 0),
+        capped_limit = max(1, limit)
+        current_cursor = cursor
+        collected: list[CommentItem] = []
+        page_data: dict[str, Any] = {}
+
+        while len(collected) < capped_limit:
+            payload = await self._request_json(
+                "/api/sns/web/v2/comment/page",
+                method="GET",
+                params={
+                    "note_id": note.note_id,
+                    "cursor": current_cursor,
+                    "top_comment_id": "",
+                    "image_formats": "jpg,webp,avif",
+                    "xsec_token": note.xsec_token,
+                },
             )
-            for item in comments
-        ]
+            page_data = payload.get("data") or {}
+            comments = page_data.get("comments") or []
+            for item in comments:
+                collected.append(self._parse_comment_item(item))
+                if len(collected) >= capped_limit:
+                    break
+            if len(collected) >= capped_limit:
+                break
+            if not all_pages or not page_data.get("has_more") or not comments:
+                break
+            current_cursor = str(page_data.get("cursor") or "")
+
+        time_ms = int(page_data.get("time") or 0)
+        return CommentPage(
+            comments=collected[:capped_limit],
+            cursor=str(page_data.get("cursor") or ""),
+            has_more=bool(page_data.get("has_more", False)),
+            time_ms=time_ms,
+            fetched_at=format_millis_timestamp(time_ms),
+            user_id=str(page_data.get("user_id") or ""),
+            xsec_token=str(page_data.get("xsec_token") or ""),
+            raw_page=dict(page_data),
+        )
 
     async def _request_json(
         self,
@@ -301,6 +348,46 @@ class XhsApi:
             comment_count=int(interact.get("comment_count") or 0),
             xsec_token=xsec_token,
             url=f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}",
+        )
+
+    @staticmethod
+    def _normalize_sub_comment(item: dict[str, Any]) -> dict[str, Any]:
+        user = item.get("user_info") or {}
+        normalized = dict(item)
+        normalized["created_at"] = format_millis_timestamp(item.get("create_time"))
+        normalized["create_time_ms"] = int(item.get("create_time") or 0)
+        normalized["liked_count"] = int(item.get("like_count") or 0)
+        normalized["user_name"] = str(user.get("nickname") or "")
+        normalized["user_id"] = str(user.get("user_id") or "")
+        normalized["user_xsec_token"] = str(user.get("xsec_token") or "")
+        normalized["user_avatar"] = str(user.get("image") or user.get("avatar") or "")
+        return normalized
+
+    @classmethod
+    def _parse_comment_item(cls, item: dict[str, Any]) -> CommentItem:
+        user = item.get("user_info") or {}
+        sub_comments = [cls._normalize_sub_comment(sub) for sub in (item.get("sub_comments") or [])]
+        return CommentItem(
+            comment_id=str(item.get("id") or ""),
+            note_id=str(item.get("note_id") or ""),
+            user_name=str(user.get("nickname") or ""),
+            user_id=str(user.get("user_id") or ""),
+            user_xsec_token=str(user.get("xsec_token") or ""),
+            user_avatar=str(user.get("image") or user.get("avatar") or ""),
+            content=str(item.get("content") or ""),
+            created_at=format_millis_timestamp(item.get("create_time")),
+            create_time_ms=int(item.get("create_time") or 0),
+            liked_count=int(item.get("like_count") or 0),
+            liked=bool(item.get("liked", False)),
+            status=int(item.get("status") or 0),
+            ip_location=str(item.get("ip_location") or ""),
+            show_tags=list(item.get("show_tags") or []),
+            at_users=list(item.get("at_users") or []),
+            sub_comment_count=int(item.get("sub_comment_count") or 0),
+            sub_comment_cursor=str(item.get("sub_comment_cursor") or ""),
+            sub_comment_has_more=bool(item.get("sub_comment_has_more", False)),
+            sub_comments=sub_comments,
+            raw_comment=dict(item),
         )
 
     @staticmethod

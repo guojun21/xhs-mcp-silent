@@ -11,7 +11,7 @@ from typing import Any, TextIO
 
 from .browser import ChromeLoginLauncher
 from .cookie_resolver import ChromeCookieResolver, DEFAULT_PROFILE
-from .models import CommentItem, NoteDetail, NoteSummary, XhsSilentError
+from .models import CommentItem, CommentPage, NoteDetail, NoteSummary, XhsSilentError
 from .profile_resolver import ChromeProfileResolver
 from .xhs_api import XhsApi
 
@@ -77,13 +77,14 @@ HELP_TOPICS = {
         ],
     },
     "comments": {
-        "summary": "Fetch first-level comments from a Xiaohongshu note URL.",
+        "summary": "Fetch note comments, pagination metadata, and embedded sub-comments from a Xiaohongshu note URL.",
         "body": [
             "Use this when queue, service quality, or consumer sentiment matters.",
+            "JSON mode includes cursor, has_more, page metadata, and embedded sub_comments.",
             "",
             "Example:",
             "xhs-silent comments \"https://www.xiaohongshu.com/explore/...?...\" --limit 5",
-            "xhs-silent --json comments \"https://www.xiaohongshu.com/explore/...?...\" --limit 10",
+            "xhs-silent --json comments \"https://www.xiaohongshu.com/explore/...?...\" --limit 20 --all-pages",
         ],
     },
     "profiles": {
@@ -141,9 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
     note_parser = subparsers.add_parser("note", help="Get note detail from a Xiaohongshu note URL.")
     note_parser.add_argument("url", help="Note URL with xsec_token.")
 
-    comments_parser = subparsers.add_parser("comments", help="Get first-level comments from a Xiaohongshu note URL.")
+    comments_parser = subparsers.add_parser("comments", help="Get comments, page metadata, and embedded sub-comments from a Xiaohongshu note URL.")
     comments_parser.add_argument("url", help="Note URL with xsec_token.")
     comments_parser.add_argument("--limit", type=int, default=10, help="Maximum number of comments. Default: 10.")
+    comments_parser.add_argument("--cursor", default="", help="Start from a specific comments cursor.")
+    comments_parser.add_argument("--all-pages", action="store_true", help="Keep paginating until limit is reached or the server has no more comments.")
     return parser
 
 
@@ -211,10 +214,17 @@ def format_note_detail(item: NoteDetail) -> str:
     parts = [
         f"标题: {item.title or '(无标题)'}",
         f"作者: {item.author or '(未知)'}",
+        f"作者ID: {item.author_user_id or '(未知)'}",
         f"发布时间: {item.published_at or '(未知)'}",
+        f"最后更新: {item.last_update_at or '(未知)'}",
+        f"类型: {item.note_type or '(未知)'}",
         f"点赞数: {item.liked_count}",
         f"评论数: {item.comment_count}",
         f"收藏数: {item.collected_count}",
+        f"分享数: {item.shared_count}",
+        f"IP归属地: {item.ip_location or '(未知)'}",
+        f"图片数: {len(item.image_list)}",
+        f"话题数: {len(item.tag_list)}",
         f"链接: {item.url}",
         "",
         "内容:",
@@ -225,19 +235,35 @@ def format_note_detail(item: NoteDetail) -> str:
     return "\n".join(parts)
 
 
-def format_comments(items: list[CommentItem]) -> str:
-    if not items:
+def format_comments(page: CommentPage) -> str:
+    if not page.comments:
         return "暂无评论。"
-    lines = [f"评论（{len(items)} 条）：", ""]
-    for index, item in enumerate(items, start=1):
+    lines = [
+        f"评论（{len(page.comments)} 条）：",
+        f"has_more: {page.has_more}",
+        f"cursor: {page.cursor or '(空)'}",
+        "",
+    ]
+    for index, item in enumerate(page.comments, start=1):
         lines.extend(
             [
                 f"{index}. {item.user_name or '(未知用户)'}（{item.created_at or '未知时间'}）",
+                f"评论ID: {item.comment_id or '(未知)'}",
                 item.content or "(空评论)",
-                f"点赞: {item.liked_count}",
+                f"点赞: {item.liked_count}  子评论: {item.sub_comment_count}  已点赞: {item.liked}",
+                f"IP归属地: {item.ip_location or '(未知)'}",
                 "",
             ]
         )
+        for sub_index, sub in enumerate(item.sub_comments, start=1):
+            lines.extend(
+                [
+                    f"  ↳ {sub_index}. {sub.get('user_name') or '(未知用户)'}（{sub.get('created_at') or '未知时间'}）",
+                    f"  {sub.get('content') or '(空评论)'}",
+                    f"  点赞: {sub.get('liked_count') or 0}",
+                    "",
+                ]
+            )
     return "\n".join(lines).strip()
 
 
@@ -367,7 +393,12 @@ async def run_async(
             return 0
 
         if args.command == "comments":
-            comments = await api.get_note_comments(args.url, limit=args.limit)
+            comments = await api.get_note_comments(
+                args.url,
+                limit=args.limit,
+                cursor=args.cursor,
+                all_pages=args.all_pages,
+            )
             print_payload(comments if args.json else format_comments(comments), as_json=args.json, stdout=stdout)
             return 0
     except XhsSilentError as exc:

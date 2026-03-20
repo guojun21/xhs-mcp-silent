@@ -14,7 +14,7 @@ from xhs_mcp_silent.cli import (
     format_search_results,
     run_async,
 )
-from xhs_mcp_silent.models import CheckCookieResult, CommentItem, NoteDetail, NoteSummary, XhsSilentError
+from xhs_mcp_silent.models import CheckCookieResult, CommentItem, CommentPage, NoteDetail, NoteSummary, XhsSilentError
 
 
 class FakeLauncher:
@@ -113,33 +113,85 @@ def test_format_note_detail() -> None:
             note_id="1",
             title="详情标题",
             author="作者",
+            author_user_id="u1",
+            author_xsec_token="token",
+            author_avatar="https://img.example/avatar.jpg",
             published_at="2026-03-20 12:00:00",
+            published_time_ms=1773988800000,
+            last_update_at="2026-03-20 12:30:00",
+            last_update_time_ms=1773990600000,
+            note_type="normal",
             liked_count=11,
             collected_count=4,
             comment_count=5,
+            shared_count=7,
+            liked=True,
+            collected=False,
             content="正文内容",
             cover_url="https://img.example/cover.jpg",
+            ip_location="深圳",
+            tag_list=[{"name": "标签1"}],
+            at_user_list=[],
+            image_list=[{"url_pre": "https://img.example/cover.jpg"}],
+            share_info={"un_share": False},
+            user={"nickname": "作者"},
             url="https://www.xiaohongshu.com/explore/1?xsec_token=token",
+            raw_note_card={"title": "详情标题"},
         )
     )
     assert "详情标题" in result
     assert "正文内容" in result
     assert "封面: https://img.example/cover.jpg" in result
+    assert "IP归属地: 深圳" in result
 
 
 def test_format_comments() -> None:
     result = format_comments(
-        [
-            CommentItem(
-                user_name="评论者",
-                content="不错",
-                created_at="2026-03-20 12:01:00",
-                liked_count=6,
-            )
-        ]
+        CommentPage(
+            comments=[
+                CommentItem(
+                    comment_id="c1",
+                    note_id="n1",
+                    user_name="评论者",
+                    user_id="u1",
+                    user_xsec_token="token",
+                    user_avatar="https://img.example/user.jpg",
+                    content="不错",
+                    created_at="2026-03-20 12:01:00",
+                    create_time_ms=1773988860000,
+                    liked_count=6,
+                    liked=False,
+                    status=0,
+                    ip_location="深圳",
+                    show_tags=["热评"],
+                    at_users=[],
+                    sub_comment_count=1,
+                    sub_comment_cursor="sub-cursor",
+                    sub_comment_has_more=False,
+                    sub_comments=[
+                        {
+                            "content": "子评论",
+                            "created_at": "2026-03-20 12:02:00",
+                            "user_name": "回复者",
+                            "liked_count": 1,
+                        }
+                    ],
+                    raw_comment={"content": "不错"},
+                )
+            ],
+            cursor="next-cursor",
+            has_more=True,
+            time_ms=1773988870000,
+            fetched_at="2026-03-20 12:01:10",
+            user_id="u1",
+            xsec_token="page-token",
+            raw_page={"cursor": "next-cursor"},
+        )
     )
     assert "评论者" in result
     assert "不错" in result
+    assert "cursor: next-cursor" in result
+    assert "子评论" in result
 
 
 @pytest.mark.asyncio

@@ -79,6 +79,8 @@ xhs-silent login
 
 ```bash
 xhs-silent --json search "深圳 咖啡" --limit 3
+xhs-silent --json note "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy"
+xhs-silent --json comments "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy" --limit 20 --all-pages
 ```
 
 ## CLI 帮助
@@ -131,7 +133,15 @@ xhs-silent --json search "深圳 约会 餐厅" --limit 10
 
 ### `note`
 
-抓取笔记正文和元信息。
+抓取笔记正文和元信息。`--json` 模式下会返回更完整的详情字段，包括：
+
+- 作者 ID / 头像 / xsec_token
+- 发布时间与毫秒时间戳
+- 最后更新时间
+- 标签列表
+- 图片列表
+- `share_info`
+- 原始 `raw_note_card`
 
 ```bash
 xhs-silent note "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy"
@@ -140,11 +150,26 @@ xhs-silent --json note "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy
 
 ### `comments`
 
-抓取一级评论，适合判断排队、服务、踩雷、值不值得。
+抓取评论页。`--json` 模式下不再只是评论数组，而是完整评论页对象，包含：
+
+- `comments`
+- `cursor`
+- `has_more`
+- `user_id`
+- `xsec_token`
+- 每条评论的 `sub_comments`
+- 每条评论的原始 `raw_comment`
+- 整页原始 `raw_page`
+
+可选参数：
+
+- `--cursor`: 从指定评论游标继续抓
+- `--all-pages`: 自动翻页直到达到 `--limit` 或服务器没有更多评论
 
 ```bash
 xhs-silent comments "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy" --limit 5
 xhs-silent --json comments "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy" --limit 10
+xhs-silent --json comments "https://www.xiaohongshu.com/explore/xxxx?xsec_token=yyyy" --limit 20 --all-pages
 ```
 
 ## 典型工作流

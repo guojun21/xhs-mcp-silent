@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from xhs_mcp_silent.models import NoteDetail
+from xhs_mcp_silent.models import CommentPage, NoteDetail
 from xhs_mcp_silent.xhs_api import SEARCH_DEFAULT_FILTERS, XhsApi
 
 
@@ -42,13 +42,20 @@ class FakeApi(XhsApi):
                                 "title": "详情标题",
                                 "desc": "正文",
                                 "time": 1710900000000,
+                                "last_update_time": 1710900001000,
+                                "type": "normal",
                                 "user": {"nickname": "作者"},
                                 "interact_info": {
                                     "liked_count": 1,
                                     "collected_count": 2,
                                     "comment_count": 3,
+                                    "shared_count": 4,
+                                    "liked": True,
+                                    "collected": False,
                                 },
                                 "image_list": [{"url_pre": "https://img"}],
+                                "tag_list": [{"name": "标签"}],
+                                "share_info": {"un_share": False},
                             }
                         }
                     ]
@@ -60,18 +67,51 @@ class FakeApi(XhsApi):
                 "data": {
                     "comments": [
                         {
+                            "id": "c1",
+                            "note_id": "123",
                             "user_info": {"nickname": "用户A"},
                             "content": "评论A",
                             "create_time": 1710900000000,
                             "like_count": 7,
+                            "liked": True,
+                            "status": 0,
+                            "show_tags": ["热评"],
+                            "at_users": [],
+                            "sub_comment_count": 1,
+                            "sub_comment_cursor": "cursor-1",
+                            "sub_comment_has_more": False,
+                            "sub_comments": [
+                                {
+                                    "id": "sc1",
+                                    "content": "子评论A",
+                                    "create_time": 1710900002000,
+                                    "like_count": 1,
+                                    "user_info": {"nickname": "回复者"},
+                                }
+                            ],
                         },
                         {
+                            "id": "c2",
+                            "note_id": "123",
                             "user_info": {"nickname": "用户B"},
                             "content": "评论B",
                             "create_time": 1710900001000,
                             "like_count": 1,
+                            "liked": False,
+                            "status": 0,
+                            "show_tags": [],
+                            "at_users": [],
+                            "sub_comment_count": 0,
+                            "sub_comment_cursor": "",
+                            "sub_comment_has_more": False,
+                            "sub_comments": [],
                         },
-                    ]
+                    ],
+                    "cursor": "next-cursor",
+                    "has_more": True,
+                    "time": 1710900003000,
+                    "user_id": "user-1",
+                    "xsec_token": "page-token",
                 },
             }
         if uri == "/api/sns/web/v2/user/me":
@@ -175,14 +215,19 @@ async def test_get_note_content_parsing() -> None:
     assert isinstance(detail, NoteDetail)
     assert detail.title == "详情标题"
     assert detail.content == "正文"
+    assert detail.shared_count == 4
+    assert detail.tag_list == [{"name": "标签"}]
 
 
 @pytest.mark.asyncio
 async def test_get_note_comments_limit() -> None:
     api = FakeApi()
     comments = await api.get_note_comments("https://www.xiaohongshu.com/explore/123?xsec_token=token", limit=1)
-    assert len(comments) == 1
-    assert comments[0].user_name == "用户A"
+    assert isinstance(comments, CommentPage)
+    assert len(comments.comments) == 1
+    assert comments.comments[0].user_name == "用户A"
+    assert comments.comments[0].sub_comments[0]["content"] == "子评论A"
+    assert comments.cursor == "next-cursor"
 
 
 class GuestCheckApi(XhsApi):

@@ -101,13 +101,30 @@ class NoteDetail:
     note_id: str
     title: str
     author: str
+    author_user_id: str
+    author_xsec_token: str
+    author_avatar: str
     published_at: str
+    published_time_ms: int
+    last_update_at: str
+    last_update_time_ms: int
+    note_type: str
     liked_count: int
     collected_count: int
     comment_count: int
+    shared_count: int
+    liked: bool
+    collected: bool
     content: str
     cover_url: str
+    ip_location: str
+    tag_list: list[dict[str, Any]]
+    at_user_list: list[dict[str, Any]]
+    image_list: list[dict[str, Any]]
+    share_info: dict[str, Any]
+    user: dict[str, Any]
     url: str
+    raw_note_card: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -115,10 +132,41 @@ class NoteDetail:
 
 @dataclass(frozen=True)
 class CommentItem:
+    comment_id: str
+    note_id: str
     user_name: str
+    user_id: str
+    user_xsec_token: str
+    user_avatar: str
     content: str
     created_at: str
+    create_time_ms: int
     liked_count: int
+    liked: bool
+    status: int
+    ip_location: str
+    show_tags: list[Any]
+    at_users: list[dict[str, Any]]
+    sub_comment_count: int
+    sub_comment_cursor: str
+    sub_comment_has_more: bool
+    sub_comments: list[dict[str, Any]]
+    raw_comment: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class CommentPage:
+    comments: list[CommentItem]
+    cursor: str
+    has_more: bool
+    time_ms: int
+    fetched_at: str
+    user_id: str
+    xsec_token: str
+    raw_page: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
