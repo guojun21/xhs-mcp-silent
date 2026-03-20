@@ -30,6 +30,15 @@ DEFAULT_HEADERS = {
     ),
 }
 
+SEARCH_PAGE_SIZE = 20
+SEARCH_DEFAULT_FILTERS = [
+    {"tags": ["general"], "type": "sort_type"},
+    {"tags": ["不限"], "type": "filter_note_type"},
+    {"tags": ["不限"], "type": "filter_note_time"},
+    {"tags": ["不限"], "type": "filter_note_range"},
+    {"tags": ["不限"], "type": "filter_pos_distance"},
+]
+
 X_S_COMMON = (
     "2UQAPsHCPUIjqArjwjHjNsQhPsHCH0rjNsQhPaHCH0c1PahIHjIj2eHjwjQ+GnPW/MPjNsQhPUHCHdYiqUMIGUM78nHjNsQh+sHCH0c1"
     "+0H1PUHVHdWMH0ijP/DAP9L9P/DhPerUJoL72nIM+9Qf8fpC2fHA8n4Fy0m1Gnpd4n+I+BHAPeZIPerMw/GhPjHVHdW9H0il+Ac7weZ7"
@@ -85,23 +94,37 @@ class XhsApi:
         )
 
     async def search_notes(self, keywords: str, limit: int = 10) -> list[NoteSummary]:
-        payload = await self._request_json(
-            "/api/sns/web/v1/search/notes",
-            method="POST",
-            data={
-                "keyword": keywords,
-                "page": 1,
-                "page_size": limit,
-                "search_id": self._search_id(),
-                "sort": "general",
-                "note_type": 0,
-                "ext_flags": [],
-                "geo": "",
-                "image_formats": json.dumps(["jpg", "webp", "avif"], separators=(",", ":")),
-            },
-        )
-        items = ((payload.get("data") or {}).get("items") or [])[:limit]
-        return [self._parse_note_summary(item) for item in items if self._can_parse_note_summary(item)]
+        capped_limit = max(1, limit)
+        search_id = self._search_id()
+        results: list[NoteSummary] = []
+        seen_ids: set[str] = set()
+        page = 1
+
+        while len(results) < capped_limit:
+            payload = await self._request_json(
+                "/api/sns/web/v1/search/notes",
+                method="POST",
+                data=self._build_search_payload(keywords, page=page, search_id=search_id),
+            )
+            data = payload.get("data") or {}
+            items = data.get("items") or []
+            for item in items:
+                if not self._can_parse_note_summary(item):
+                    continue
+                note = self._parse_note_summary(item)
+                if note.note_id in seen_ids:
+                    continue
+                seen_ids.add(note.note_id)
+                results.append(note)
+                if len(results) >= capped_limit:
+                    break
+            if len(results) >= capped_limit:
+                break
+            if not data.get("has_more") or not items:
+                break
+            page += 1
+
+        return results[:capped_limit]
 
     async def get_note_content(self, url: str) -> NoteDetail:
         note = NoteUrl.parse(url)
@@ -242,8 +265,26 @@ class XhsApi:
 
     @staticmethod
     def _can_parse_note_summary(item: dict[str, Any]) -> bool:
+        model_type = str(item.get("modelType") or item.get("model_type") or "")
+        if model_type and model_type != "note":
+            return False
         note_card = item.get("note_card") or {}
         return bool(item.get("id")) and bool(note_card)
+
+    @staticmethod
+    def _build_search_payload(keywords: str, *, page: int, search_id: str) -> dict[str, Any]:
+        return {
+            "keyword": keywords,
+            "page": page,
+            "page_size": SEARCH_PAGE_SIZE,
+            "search_id": search_id,
+            "sort": "general",
+            "note_type": 0,
+            "ext_flags": [],
+            "filters": SEARCH_DEFAULT_FILTERS,
+            "geo": "",
+            "image_formats": ["jpg", "webp", "avif"],
+        }
 
     @staticmethod
     def _parse_note_summary(item: dict[str, Any]) -> NoteSummary:

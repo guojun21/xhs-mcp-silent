@@ -1,6 +1,6 @@
 [project]
 name = "xhs-mcp-silent"
-version = "0.3.0"
+version = "0.3.1"
 description = "Silent Xiaohongshu CLI that reuses Chrome cookies on macOS without Playwright or Chromium automation."
 readme = "README.md"
 requires-python = ">=3.10"
